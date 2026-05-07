@@ -315,8 +315,39 @@ const C = {
 };
 
 // ════════════════════════════════════════════════════════════
+// MODUS-KONFIGURATION
+// ════════════════════════════════════════════════════════════
+const MODUS_CFG = [
+  { wert:'basis',           label:'Basis',           badge:'Schnellschätzung', color:'#16a34a' },
+  { wert:'fortgeschritten', label:'Fortgeschritten',  badge:'Profianwender',    color:'#0284c7' },
+  { wert:'experte',         label:'Experte',          badge:'Vollnormativ',     color:'#d97706' },
+];
+
+// ════════════════════════════════════════════════════════════
 // UI-HILFSKOMPONENTEN
 // ════════════════════════════════════════════════════════════
+
+function ModusSelector({ modus, onModusChange }) {
+  return (
+    <View style={styles.modusWrap}>
+      {MODUS_CFG.map((m) => {
+        const on = m.wert === modus;
+        return (
+          <TouchableOpacity
+            key={m.wert}
+            style={[styles.modusBtn, on && { backgroundColor: m.color }]}
+            onPress={() => onModusChange(m.wert)}
+            activeOpacity={0.8}>
+            <Text style={[styles.modusLabel, on && styles.modusLabelOn]}>{m.label}</Text>
+            <Text style={[styles.modusBadge, { color: on ? 'rgba(255,255,255,0.75)' : 'rgba(255,255,255,0.25)' }]}>
+              {m.badge}
+            </Text>
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
+}
 
 function Btns({ opts, val, set, sm, mt }) {
   return (
@@ -387,7 +418,7 @@ function FaktorRow({label, detail, wert}) {
 }
 
 // Kriterium-Zeile im Ergebnis
-function KritRow({label, qMin, qMassgeb, maßgebend, ok}) {
+function KritRow({label, qMin, maßgebend, ok}) {
   return (
     <View style={styles.kritRow}>
       <View style={{flex:1}}>
@@ -444,6 +475,9 @@ export default function App() {
   // ── Ergebnis ──
   const [ergebnis,     setErgebnis]     = useState(null);
 
+  // ── Modus ──
+  const [modus,        setModus]        = useState('basis');
+
   // Abgeleitetes
   const isErd  = verlegeart === 'erdreich';
   const isDrei = schaltung  === 'dreiphasig';
@@ -451,7 +485,7 @@ export default function App() {
   const sinPhi = parseFloat(Math.sqrt(Math.max(0,1-cosPhi*cosPhi)).toFixed(4));
   const tFault = T_FAULT_OPTS[tFaultIdx];
 
-  // Live-Faktoren
+  // Live-Faktoren (für Gesamtfaktor-Karte)
   const LFH  = fH(anzSk);
   const LFL  = fL(anzLagen);
   const LFT  = fTemp(iso, isErd, temp);
@@ -463,6 +497,12 @@ export default function App() {
   // k-Wert für Anzeige
   const kKSAkt = KS_K[material][iso];
 
+  const modusSubtitel = {
+    basis:          'DIN VDE 0298 · Schnellschätzung',
+    fortgeschritten:'DIN VDE 0298 · Profirechner',
+    experte:        'DIN VDE 0298 · Vollnormativ',
+  }[modus];
+
   const onVerleg = (v) => { setVerlegeart(v); setTemp(v==='erdreich'?20:30); };
   const onBa     = (s) => { setBa(s); setBaDet({s1:'dauer',s2:'t30',s3:'ed40'}[s]); };
   const onIso    = (i) => {
@@ -471,15 +511,30 @@ export default function App() {
     if (!isErd && temp > maxT) setTemp(maxT);
   };
 
-  const onBerechnen = () => setErgebnis(berechne({
-    stromstaerke:strom, laenge, schaltungsart:schaltung, cosPhi,
-    material, isolierung:iso, verlegeart,
-    anzahlSk:anzSk, anzahlLagen:anzLagen, temperatur:temp, bodenRho:rho,
-    betriebsart:ba, betriebDet, thd,
-    duGrenzwert:duGrenz,
-    parallelModus:parallelOn, anzahlParallel:anzParallel,
-    ikA, tFault,
-  }));
+  const onBerechnen = () => {
+    const params = {
+      stromstaerke:   strom,
+      laenge,
+      schaltungsart:  schaltung,
+      cosPhi:         modus === 'basis' ? 1.0 : cosPhi,
+      material:       modus === 'basis' ? 'kupfer' : material,
+      isolierung:     modus === 'basis' ? 'pvc' : iso,
+      verlegeart,
+      anzahlSk:       modus === 'basis' ? 1 : anzSk,
+      anzahlLagen:    modus === 'experte' ? anzLagen : 1,
+      temperatur:     modus === 'basis' ? (isErd ? 20 : 30) : temp,
+      bodenRho:       modus === 'basis' ? 1.0 : rho,
+      betriebsart:    modus === 'experte' ? ba : 's1',
+      betriebDet:     modus === 'experte' ? baDet : 'dauer',
+      thd:            modus === 'experte' ? thd : 'keine',
+      duGrenzwert:    modus === 'basis' ? 3.0 : duGrenz,
+      parallelModus:  modus === 'experte' ? parallelOn : false,
+      anzahlParallel: modus === 'experte' ? anzParallel : 1,
+      ikA:            modus === 'experte' ? ikA : '',
+      tFault,
+    };
+    setErgebnis(berechne(params));
+  };
 
   const onReset = () => {
     setStrom(''); setLaenge('');
@@ -490,6 +545,24 @@ export default function App() {
     setBa('s1'); setBaDet('dauer'); setThd('keine');
     setDuGrenz(3.0); setIkA(''); setTFaultIdx(1);
     setErgebnis(null);
+  };
+
+  const onModusChange = (neuerModus) => {
+    setModus(neuerModus);
+    setErgebnis(null);
+    if (neuerModus === 'basis') {
+      setMaterial('kupfer'); setIso('pvc'); setCpIdx(10);
+      setTemp(isErd ? 20 : 30);
+      setAnzSk(1); setAnzLagen(1); setRho(1.0);
+      setBa('s1'); setBaDet('dauer'); setThd('keine');
+      setDuGrenz(3.0); setParallelOn(false); setAnzParallel(2);
+      setIkA(''); setTFaultIdx(1);
+    } else if (neuerModus === 'fortgeschritten') {
+      setAnzLagen(1);
+      setBa('s1'); setBaDet('dauer'); setThd('keine');
+      setParallelOn(false); setAnzParallel(2);
+      setIkA(''); setTFaultIdx(1);
+    }
   };
 
   const tempOpts = isErd ? TEMP_ERD : (iso==='xlpe' ? TEMP_XLPE : TEMP_PVC);
@@ -507,14 +580,19 @@ export default function App() {
           {/* ── Kopf ── */}
           <View style={styles.kopf}>
             <Text style={styles.kopfT}>Kabelquerschnitt-Rechner</Text>
-            <Text style={styles.kopfS}>DIN VDE 0298 · vollständig</Text>
+            <Text style={styles.kopfS}>{modusSubtitel}</Text>
           </View>
+
+          {/* ── Modus-Auswahl ── */}
+          <ModusSelector modus={modus} onModusChange={onModusChange}/>
 
           {/* ══════════════════════════════════════════
               KARTE 1: GRUNDPARAMETER
           ══════════════════════════════════════════ */}
           <View style={styles.card}>
-            <Text style={styles.cardT}>Grundparameter</Text>
+            <Text style={[styles.cardT, { borderBottomColor: MODUS_CFG.find(m=>m.wert===modus)?.color ?? C.rand }]}>
+              Grundparameter
+            </Text>
 
             {/* Stromstärke */}
             <View style={styles.field}>
@@ -547,7 +625,8 @@ export default function App() {
               ]}/>
             </View>
 
-            {/* cos φ */}
+            {/* cos φ – ab Fortgeschritten */}
+            {modus !== 'basis' && (
             <View style={styles.field}>
               <FieldHead label="Leistungsfaktor cos φ"
                 pill={<Pill txt={`sin φ = ${sinPhi.toFixed(3)}`} warn={cosPhi<0.85}/>}/>
@@ -555,8 +634,10 @@ export default function App() {
                 fmt={(i)=>`cos φ = ${(0.50+i*0.05).toFixed(2)}`}/>
               {cosPhi<0.9&&<Text style={styles.hint}>Reaktanzanteil (X_L · sin φ) wird berücksichtigt.</Text>}
             </View>
+            )}
 
-            {/* Material */}
+            {/* Material – ab Fortgeschritten */}
+            {modus !== 'basis' && (
             <View style={styles.field}>
               <Text style={styles.flabel}>Leitermaterial</Text>
               <Btns val={material} set={setMaterial} opts={[
@@ -564,8 +645,10 @@ export default function App() {
                 {wert:'aluminium', label:'Aluminium (Al)', sub:'κ = 34 m/(Ω·mm²)'},
               ]}/>
             </View>
+            )}
 
-            {/* Isolierung */}
+            {/* Isolierung – ab Fortgeschritten */}
+            {modus !== 'basis' && (
             <View style={styles.field}>
               <Text style={styles.flabel}>Isolierstoff / Kabeltyp</Text>
               <Btns val={iso} set={onIso} opts={[
@@ -573,6 +656,7 @@ export default function App() {
                 {wert:'xlpe', label:'XLPE / EPR', sub:'90 °C · N2XH / NYY-O'},
               ]}/>
             </View>
+            )}
 
             {/* Verlegeart 3+2 */}
             <View style={styles.field}>
@@ -608,7 +692,8 @@ export default function App() {
               </View>
             </View>
 
-            {/* Parallelverlegung */}
+            {/* Parallelverlegung – nur Experte */}
+            {modus === 'experte' && (
             <View style={[styles.field,{marginBottom:0}]}>
               <FieldHead label="Parallelverlegung"
                 pill={parallelOn ? <Pill txt={`${anzParallel} × Kabel`} lila/> : null}/>
@@ -629,13 +714,26 @@ export default function App() {
                 </>
               )}
             </View>
+            )}
+
+            {/* Basis-Info */}
+            {modus === 'basis' && (
+              <View style={styles.basisInfo}>
+                <Text style={styles.basisInfoTxt}>
+                  {'Feste Annahmen: Kupfer · PVC 70°C · cos φ = 1,0 · Temp. 30°C · ΔU ≤ 3%'}
+                </Text>
+              </View>
+            )}
           </View>
 
           {/* ══════════════════════════════════════════
-              KARTE 2: KORREKTURFAKTOREN
+              KARTE 2: KORREKTURFAKTOREN (ab Fortgeschritten)
           ══════════════════════════════════════════ */}
+          {modus !== 'basis' && (
           <View style={styles.card}>
-            <Text style={styles.cardT}>Korrekturfaktoren · DIN VDE 0298-4</Text>
+            <Text style={[styles.cardT, { borderBottomColor: MODUS_CFG.find(m=>m.wert===modus)?.color ?? C.rand }]}>
+              Korrekturfaktoren · DIN VDE 0298-4
+            </Text>
 
             {/* Häufung */}
             <View style={styles.field}>
@@ -649,7 +747,8 @@ export default function App() {
               </Text>
             </View>
 
-            {anzSk>1&&(
+            {/* Lagen – nur Experte */}
+            {modus === 'experte' && anzSk>1&&(
               <View style={styles.field}>
                 <FieldHead label="Lagen (mehrlagige Häufung)"
                   pill={<Pill txt={`fˡ = ${LFL.toFixed(2)}`} warn={LFL<1.0}/>}/>
@@ -706,40 +805,43 @@ export default function App() {
               </View>
             )}
 
-            <Sep/>
+            {/* Betriebsart – nur Experte */}
+            {modus === 'experte' && (
+            <>
+              <Sep/>
+              <View style={styles.field}>
+                <FieldHead label="Betriebsart"
+                  pill={<Pill txt={`fᴮ = ${LFBA.toFixed(2)}`}/>}/>
+                <Btns val={ba} set={onBa} opts={[
+                  {wert:'s1',label:'S1',sub:'Dauerbetrieb'},
+                  {wert:'s2',label:'S2',sub:'Kurzzeitbetrieb'},
+                  {wert:'s3',label:'S3',sub:'Aussetzbetrieb'},
+                ]}/>
+                {ba==='s2'&&(
+                  <View style={{marginTop:10}}>
+                    <Text style={styles.subLbl}>Einschaltdauer</Text>
+                    <Btns val={baDet} set={setBaDet} sm opts={[
+                      {wert:'t10',label:'10 min'},{wert:'t30',label:'30 min'},
+                      {wert:'t60',label:'60 min'},{wert:'t90',label:'90 min'},
+                    ]}/>
+                  </View>
+                )}
+                {ba==='s3'&&(
+                  <View style={{marginTop:10}}>
+                    <Text style={styles.subLbl}>Einschaltdauer ED</Text>
+                    <Btns val={baDet} set={setBaDet} sm opts={[
+                      {wert:'ed15',label:'ED 15 %'},{wert:'ed25',label:'ED 25 %'},
+                      {wert:'ed40',label:'ED 40 %'},{wert:'ed60',label:'ED 60 %'},
+                    ]}/>
+                  </View>
+                )}
+                {ba!=='s1'&&<Text style={styles.hint}>Nur für Motoren/Maschinen. Heiz-/Beleuchtungslasten stets S1.</Text>}
+              </View>
+            </>
+            )}
 
-            {/* Betriebsart */}
-            <View style={styles.field}>
-              <FieldHead label="Betriebsart"
-                pill={<Pill txt={`fᴮ = ${LFBA.toFixed(2)}`}/>}/>
-              <Btns val={ba} set={onBa} opts={[
-                {wert:'s1',label:'S1',sub:'Dauerbetrieb'},
-                {wert:'s2',label:'S2',sub:'Kurzzeitbetrieb'},
-                {wert:'s3',label:'S3',sub:'Aussetzbetrieb'},
-              ]}/>
-              {ba==='s2'&&(
-                <View style={{marginTop:10}}>
-                  <Text style={styles.subLbl}>Einschaltdauer</Text>
-                  <Btns val={baDet} set={setBaDet} sm opts={[
-                    {wert:'t10',label:'10 min'},{wert:'t30',label:'30 min'},
-                    {wert:'t60',label:'60 min'},{wert:'t90',label:'90 min'},
-                  ]}/>
-                </View>
-              )}
-              {ba==='s3'&&(
-                <View style={{marginTop:10}}>
-                  <Text style={styles.subLbl}>Einschaltdauer ED</Text>
-                  <Btns val={baDet} set={setBaDet} sm opts={[
-                    {wert:'ed15',label:'ED 15 %'},{wert:'ed25',label:'ED 25 %'},
-                    {wert:'ed40',label:'ED 40 %'},{wert:'ed60',label:'ED 60 %'},
-                  ]}/>
-                </View>
-              )}
-              {ba!=='s1'&&<Text style={styles.hint}>Nur für Motoren/Maschinen. Heiz-/Beleuchtungslasten stets S1.</Text>}
-            </View>
-
-            {/* THD */}
-            {isDrei&&(
+            {/* THD – nur Experte */}
+            {modus === 'experte' && isDrei&&(
               <>
                 <Sep/>
                 <View style={[styles.field,{marginBottom:0}]}>
@@ -762,12 +864,16 @@ export default function App() {
               </>
             )}
           </View>
+          )}
 
           {/* ══════════════════════════════════════════
-              KARTE 3: GRENZWERTE & KURZSCHLUSS
+              KARTE 3: GRENZWERTE & KURZSCHLUSS (ab Fortgeschritten)
           ══════════════════════════════════════════ */}
+          {modus !== 'basis' && (
           <View style={styles.card}>
-            <Text style={styles.cardT}>Grenzwerte & Kurzschlussprüfung</Text>
+            <Text style={[styles.cardT, { borderBottomColor: MODUS_CFG.find(m=>m.wert===modus)?.color ?? C.rand }]}>
+              Grenzwerte & Kurzschlussprüfung
+            </Text>
 
             {/* ΔU-Grenzwert */}
             <View style={styles.field}>
@@ -789,55 +895,60 @@ export default function App() {
               </Text>
             </View>
 
-            <Sep/>
+            {/* Kurzschluss – nur Experte */}
+            {modus === 'experte' && (
+            <>
+              <Sep/>
+              <View style={[styles.field,{marginBottom:0}]}>
+                <Text style={styles.flabel}>Kurzschluss-Thermische Festigkeit (optional)</Text>
+                <Text style={styles.hint}>
+                  {`Kabeltyp: ${iso.toUpperCase()} ${material === 'kupfer' ? 'Cu' : 'Al'} → k = ${kKSAkt}  ·  A_min = I_k / ${parallelOn?anzParallel:1} × √t / k`}
+                </Text>
 
-            {/* Kurzschluss */}
-            <View style={[styles.field,{marginBottom:0}]}>
-              <Text style={styles.flabel}>Kurzschluss-Thermische Festigkeit (optional)</Text>
-              <Text style={styles.hint}>
-                {`Kabeltyp: ${iso.toUpperCase()} ${material === 'kupfer' ? 'Cu' : 'Al'} → k = ${kKSAkt}  ·  A_min = I_k / ${parallelOn?anzParallel:1} × √t / k`}
-              </Text>
+                {/* I_k */}
+                <Text style={[styles.flabel,{marginTop:12}]}>Kurzschlussstrom I_k</Text>
+                <View style={styles.inputRow}>
+                  <TextInput style={styles.input} value={ikA} onChangeText={setIkA}
+                    keyboardType="decimal-pad" placeholder="z.B. 3,5 (leer = überspringen)"
+                    placeholderTextColor={C.soft}/>
+                  <View style={styles.unit}><Text style={styles.unitTxt}>kA</Text></View>
+                </View>
 
-              {/* I_k */}
-              <Text style={[styles.flabel,{marginTop:12}]}>Kurzschlussstrom I_k</Text>
-              <View style={styles.inputRow}>
-                <TextInput style={styles.input} value={ikA} onChangeText={setIkA}
-                  keyboardType="decimal-pad" placeholder="z.B. 3,5 (leer = überspringen)"
-                  placeholderTextColor={C.soft}/>
-                <View style={styles.unit}><Text style={styles.unitTxt}>kA</Text></View>
+                {/* Abschaltzeit */}
+                <Text style={[styles.flabel,{marginTop:12}]}>Abschaltzeit Schutzorgan</Text>
+                <Btns val={tFaultIdx} set={setTFaultIdx} opts={[
+                  {wert:0,label:'0,1 s',sub:'MCB inst.'},
+                  {wert:1,label:'0,2 s',sub:'MCB'},
+                  {wert:2,label:'0,4 s',sub:'Sicherung'},
+                  {wert:3,label:'1,0 s',sub:'Träge'},
+                ]}/>
+
+                {/* Live-Vorschau wenn I_k eingegeben */}
+                {(()=>{
+                  const Ikn = parseFloat(String(ikA||'').replace(',','.'));
+                  if (!isNaN(Ikn)&&Ikn>0) {
+                    const IkKabel = Ikn*1000 / (parallelOn?anzParallel:1);
+                    const aMin = IkKabel * Math.sqrt(tFault) / kKSAkt;
+                    const aRound = ALLE_QS.find(q=>q>=aMin);
+                    return(
+                      <View style={styles.ksPreview}>
+                        <Text style={styles.ksPreviewTxt}>
+                          {`I_k/Kabel = ${IkKabel.toFixed(0)} A  →  A_min = ${aMin.toFixed(1)} mm²`+
+                           `${aRound?`  →  ${aRound} mm² (Normgröße)`:'  →  > 120 mm²!'}`}
+                        </Text>
+                      </View>
+                    );
+                  }
+                  return null;
+                })()}
               </View>
-
-              {/* Abschaltzeit */}
-              <Text style={[styles.flabel,{marginTop:12}]}>Abschaltzeit Schutzorgan</Text>
-              <Btns val={tFaultIdx} set={setTFaultIdx} opts={[
-                {wert:0,label:'0,1 s',sub:'MCB inst.'},
-                {wert:1,label:'0,2 s',sub:'MCB'},
-                {wert:2,label:'0,4 s',sub:'Sicherung'},
-                {wert:3,label:'1,0 s',sub:'Träge'},
-              ]}/>
-
-              {/* Live-Vorschau wenn I_k eingegeben */}
-              {(()=>{
-                const Ikn = parseFloat(String(ikA||'').replace(',','.'));
-                if (!isNaN(Ikn)&&Ikn>0) {
-                  const IkKabel = Ikn*1000 / (parallelOn?anzParallel:1);
-                  const aMin = IkKabel * Math.sqrt(tFault) / kKSAkt;
-                  const aRound = ALLE_QS.find(q=>q>=aMin);
-                  return(
-                    <View style={styles.ksPreview}>
-                      <Text style={styles.ksPreviewTxt}>
-                        {`I_k/Kabel = ${IkKabel.toFixed(0)} A  →  A_min = ${aMin.toFixed(1)} mm²`+
-                         `${aRound?`  →  ${aRound} mm² (Normgröße)`:'  →  > 120 mm²!'}`}
-                      </Text>
-                    </View>
-                  );
-                }
-                return null;
-              })()}
-            </View>
+            </>
+            )}
           </View>
+          )}
 
-          {/* ── Gesamtfaktor ── */}
+          {/* ── Gesamtfaktor (ab Fortgeschritten) ── */}
+          {modus !== 'basis' && (
           <View style={[styles.gesamtCard, LFG<0.45&&{backgroundColor:'#7f1d1d'}]}>
             <Text style={styles.gesamtLbl}>Gesamtkorrekturfaktor f_ges</Text>
             <Text style={styles.gesamtForm}>
@@ -850,6 +961,7 @@ export default function App() {
             </Text>
             {LFG<0.5&&<Text style={styles.gesamtWarn}>⚠  Gesamtfaktor unter 0,5!</Text>}
           </View>
+          )}
 
           {/* ── Buttons ── */}
           <TouchableOpacity style={styles.calcBtn} onPress={onBerechnen} activeOpacity={0.85}>
@@ -866,7 +978,9 @@ export default function App() {
           ══════════════════════════════════════════ */}
           {ergebnis&&(
             <View style={styles.card}>
-              <Text style={styles.cardT}>Ergebnis</Text>
+              <Text style={[styles.cardT, { borderBottomColor: MODUS_CFG.find(m=>m.wert===modus)?.color ?? C.rand }]}>
+                Ergebnis
+              </Text>
 
               {ergebnis.fehler ? (
                 <View style={styles.errBox}>
@@ -898,7 +1012,9 @@ export default function App() {
                         <Text style={styles.bBadgeTxt}>Korr. {ergebnis.korrigKap.toFixed(1)} A</Text>
                       </View>
                       <View style={styles.bBadge}>
-                        <Text style={styles.bBadgeTxt}>{iso.toUpperCase()}</Text>
+                        <Text style={styles.bBadgeTxt}>
+                          {modus === 'basis' ? 'PVC · Kupfer' : iso.toUpperCase()}
+                        </Text>
                       </View>
                     </View>
                     <View style={styles.peBadge}>
@@ -918,7 +1034,8 @@ export default function App() {
                     )}
                   </View>
 
-                  {/* Dimensionierungskriterien */}
+                  {/* Dimensionierungskriterien – nur Experte */}
+                  {modus === 'experte' && (
                   <View style={styles.kritBox}>
                     <Text style={styles.kritBoxTitel}>Dimensionierungskriterien</Text>
                     <KritRow
@@ -948,14 +1065,16 @@ export default function App() {
                       </>
                     )}
                   </View>
+                  )}
 
-                  {/* Korrekturfaktor-Aufschlüsselung */}
+                  {/* Korrekturfaktor-Aufschlüsselung – ab Fortgeschritten */}
+                  {modus !== 'basis' && (
                   <View style={styles.fBox}>
                     <Text style={styles.fBoxTitel}>Korrekturfaktoren</Text>
                     <FaktorRow label="Häufung einlagig (Tab. 17)"
                       detail={anzSk===1?'Einzeln':` ${anzSk} Stromkreise`}
                       wert={`fᴴ = ${ergebnis.FH.toFixed(2)}`}/>
-                    {anzSk>1&&<><View style={styles.fsep}/>
+                    {modus === 'experte' && anzSk>1&&<><View style={styles.fsep}/>
                       <FaktorRow label="Lagenanzahl"
                         detail={`${anzLagen} Lage${anzLagen>1?'n':''}`}
                         wert={`fˡ = ${ergebnis.FL.toFixed(2)}`}/></>}
@@ -969,13 +1088,13 @@ export default function App() {
                       <FaktorRow label="Boden-Wärmewiderstand (Tab.14)"
                         detail={`ρ = ${rho} K·m/W`}
                         wert={`fᵨ = ${ergebnis.FRho.toFixed(2)}`}/></>}
-                    <View style={styles.fsep}/>
-                    <FaktorRow label="Betriebsart"
-                      detail={ba==='s1'?'S1 Dauer':
-                              ba==='s2'?`S2 ${baDet.replace('t','')} min`:
-                              `S3 ED ${baDet.replace('ed','')} %`}
-                      wert={`fᴮ = ${ergebnis.FBA.toFixed(2)}`}/>
-                    {isDrei&&<><View style={styles.fsep}/>
+                    {modus === 'experte' && <><View style={styles.fsep}/>
+                      <FaktorRow label="Betriebsart"
+                        detail={ba==='s1'?'S1 Dauer':
+                                ba==='s2'?`S2 ${baDet.replace('t','')} min`:
+                                `S3 ED ${baDet.replace('ed','')} %`}
+                        wert={`fᴮ = ${ergebnis.FBA.toFixed(2)}`}/></>}
+                    {modus === 'experte' && isDrei&&<><View style={styles.fsep}/>
                       <FaktorRow label="Oberschwingungen / THD"
                         detail={thd==='keine'?'≤15 %':thd==='mittel'?'15–33 %':'>33 %'}
                         wert={`fᵀᴴᴰ = ${ergebnis.FTHD.toFixed(2)}`}/></>}
@@ -984,8 +1103,10 @@ export default function App() {
                       detail={`I_erf = ${ergebnis.iErf.toFixed(1)} A`}
                       wert={`f_ges = ${ergebnis.FG.toFixed(3)}`}/>
                   </View>
+                  )}
 
-                  {/* Spannungsfall */}
+                  {/* Spannungsfall – ab Fortgeschritten (vollständig) */}
+                  {modus !== 'basis' && (
                   <View style={[styles.sfBox, ergebnis.sfWarn?styles.sfWarn:styles.sfOk]}>
                     <Text style={[styles.sfTitel, {color:ergebnis.sfWarn?C.warn:C.ok}]}>
                       {ergebnis.sfWarn
@@ -998,7 +1119,7 @@ export default function App() {
                     <Text style={styles.sfDet}>
                       ΔU = {ergebnis.sf.V.toFixed(2)} V  ·  Grenzwert {duGrenz} %
                     </Text>
-                    {ergebnis.xRel&&(
+                    {modus === 'experte' && ergebnis.xRel&&(
                       <View style={styles.reactBox}>
                         <Text style={styles.reactTxt}>
                           R·cosφ: {ergebnis.sf.mR.toFixed(3)} mΩ/m  ·  X·sinφ: {ergebnis.sf.mX.toFixed(3)} mΩ/m
@@ -1011,12 +1132,33 @@ export default function App() {
                       </Text>
                     )}
                   </View>
+                  )}
 
-                  {/* Begründung */}
+                  {/* Spannungsfall – Basis (vereinfacht) */}
+                  {modus === 'basis' && (
+                  <View style={[styles.sfBox, ergebnis.sfWarn?styles.sfWarn:styles.sfOk]}>
+                    <Text style={[styles.sfTitel,{color:ergebnis.sfWarn?C.warn:C.ok}]}>
+                      {ergebnis.sfWarn?'⚠  Spannungsfall > 3 %':'✓  Spannungsfall ≤ 3 %'}
+                    </Text>
+                    <Text style={[styles.sfWert,{color:ergebnis.sfWarn?C.warn:C.ok}]}>
+                      {ergebnis.sf.pct.toFixed(2)} %
+                    </Text>
+                    <Text style={styles.sfDet}>ΔU = {ergebnis.sf.V.toFixed(2)} V</Text>
+                    {ergebnis.sfWarn&&(
+                      <Text style={styles.sfHint}>
+                        Leitungslänge reduzieren oder größeren Querschnitt wählen.
+                      </Text>
+                    )}
+                  </View>
+                  )}
+
+                  {/* Begründung – nur Experte */}
+                  {modus === 'experte' && (
                   <View style={styles.begrBox}>
                     <Text style={styles.begrT}>Begründung</Text>
                     <Text style={styles.begrTxt}>{ergebnis.beg}</Text>
                   </View>
+                  )}
                 </>
               )}
             </View>
@@ -1045,9 +1187,16 @@ const styles = StyleSheet.create({
   scroll:   { flex:1 },
   content:  { paddingBottom:48 },
 
-  kopf: { paddingTop:28, paddingBottom:22, paddingHorizontal:20, alignItems:'center' },
+  kopf: { paddingTop:28, paddingBottom:16, paddingHorizontal:20, alignItems:'center' },
   kopfT:{ fontSize:24, fontWeight:'800', color:C.w, textAlign:'center' },
   kopfS:{ fontSize:12, color:C.grau, marginTop:5, letterSpacing:1.1, textTransform:'uppercase' },
+
+  // Modus-Selector
+  modusWrap:    { marginHorizontal:16, marginBottom:12, backgroundColor:'rgba(255,255,255,0.08)', borderRadius:14, padding:6, flexDirection:'row' },
+  modusBtn:     { flex:1, paddingVertical:12, borderRadius:10, alignItems:'center', justifyContent:'center' },
+  modusLabel:   { fontSize:13, fontWeight:'700', color:'rgba(255,255,255,0.45)', textAlign:'center' },
+  modusLabelOn: { color:'#ffffff' },
+  modusBadge:   { fontSize:10, fontWeight:'800', textTransform:'uppercase', letterSpacing:0.5, marginTop:2, textAlign:'center' },
 
   card: {
     backgroundColor:C.card, marginHorizontal:16, marginBottom:12,
@@ -1193,6 +1342,9 @@ const styles = StyleSheet.create({
   errBox:{ backgroundColor:C.warnBg, borderRadius:12, padding:18, borderWidth:1.5, borderColor:C.warnRand, alignItems:'center' },
   errIcon:{ fontSize:28, marginBottom:8 },
   errTxt: { color:C.warn, fontSize:15, fontWeight:'600', textAlign:'center', lineHeight:22 },
+
+  basisInfo:    { marginTop:4, backgroundColor:C.infoBg, borderRadius:10, padding:10, borderWidth:1, borderColor:C.infoRand },
+  basisInfoTxt: { fontSize:12, color:C.soft, textAlign:'center', lineHeight:17 },
 
   fuss:   { marginHorizontal:16, marginTop:4, padding:14, backgroundColor:'rgba(255,255,255,0.07)', borderRadius:12 },
   fussTxt:{ color:'rgba(255,255,255,0.4)', fontSize:11, lineHeight:16, textAlign:'center' },
